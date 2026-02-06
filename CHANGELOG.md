@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
 - Fixed Perplexity adapter model routing by mapping legacy Sonar model names to valid Responses API presets and adding provider-prefix heuristics for raw model names.
 - Added API-key preflight validation in `run_prompt` with clearer `SettingsError` messages, and added env-var aliases (`GROK_API_KEY`, `PPLX_API_KEY`, etc.).
 - Added `xai` as a provider alias equivalent to `grok` (including settings normalization and model alias resolution).
+- Updated `run_prompt` so `return_citations=True` always forces `require_search=True`, even when `require_search=False` is passed.
 
 ### Added
 - `README_API_KEYS.md` with provider key acquisition/setup instructions.

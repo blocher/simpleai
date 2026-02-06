@@ -62,6 +62,8 @@ def test_run_prompt_returns_tuple_when_citations_enabled(monkeypatch) -> None:
     assert isinstance(result, str)
     assert isinstance(citations, list)
     assert citations[0]["url"] == "https://example.com"
+    assert adapter.last_kwargs["require_search"] is True
+    assert adapter.last_kwargs["return_citations"] is True
 
 
 def test_run_prompt_infers_return_citations_from_require_search(monkeypatch) -> None:
@@ -74,6 +76,21 @@ def test_run_prompt_infers_return_citations_from_require_search(monkeypatch) -> 
     result, citations = run_prompt("hello", model="openai", require_search=True)
     assert isinstance(result, str)
     assert len(citations) == 1
+    assert adapter.last_kwargs["require_search"] is True
+    assert adapter.last_kwargs["return_citations"] is True
+
+
+def test_return_citations_true_forces_require_search_even_if_false(monkeypatch) -> None:
+    adapter = DummyAdapter()
+
+    monkeypatch.setattr("simpleai.api.load_settings", lambda settings_file=None: BASE_SETTINGS)
+    monkeypatch.setattr("simpleai.api.resolve_provider_and_model", lambda settings, model: ("openai", "gpt-5"))
+    monkeypatch.setattr("simpleai.api.get_adapter", lambda provider, provider_settings: adapter)
+
+    run_prompt("hello", model="openai", require_search=False, return_citations=True)
+
+    assert adapter.last_kwargs["require_search"] is True
+    assert adapter.last_kwargs["return_citations"] is True
 
 
 def test_run_prompt_extracts_files_when_binary_not_supported(monkeypatch, tmp_path: Path) -> None:

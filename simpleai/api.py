@@ -95,6 +95,8 @@ def run_prompt(
     """
 
     effective_return_citations = require_search if return_citations is None else return_citations
+    # Citations require grounded search context; citations always force search on.
+    effective_require_search = require_search or effective_return_citations
 
     settings = load_settings(settings_file)
     provider, resolved_model = resolve_provider_and_model(settings, model)
@@ -143,7 +145,7 @@ def run_prompt(
     event_id = logger.log_start(
         args=_build_log_args(
             prompt=prompt,
-            require_search=require_search,
+            require_search=effective_require_search,
             return_citations=effective_return_citations,
             file=file,
             files=files,
@@ -155,7 +157,7 @@ def run_prompt(
         adapter_payload={
             "provider": provider,
             "model": resolved_model,
-            "require_search": require_search,
+            "require_search": effective_require_search,
             "return_citations": effective_return_citations,
             "binary_files": binary_files,
             "adapter_supports_binary": adapter.supports_binary_files,
@@ -168,7 +170,7 @@ def run_prompt(
         adapter_response = adapter.run(
             prompt=prompt_payload,
             model=resolved_model,
-            require_search=require_search,
+            require_search=effective_require_search,
             return_citations=effective_return_citations,
             files=adapter_files,
             output_format=output_format,

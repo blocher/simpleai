@@ -79,6 +79,7 @@ def run_prompt(
 - `prompt` (required): `str` or `list[str]` conversation history.
 - `require_search` (default `False`): force provider-native search tool usage.
 - `return_citations` (default `True` when `require_search=True`, else `False`): include normalized citations.
+  - If `return_citations=True`, `require_search` is always forced to `True` (even if passed as `False`).
 - `file` / `files`: one file path or multiple file paths.
 - `binary_files` (default `True`): upload binary attachments when adapter supports them; otherwise text extraction fallback.
 - `model`: provider alias or model name.
