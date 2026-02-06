@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from simpleai.provider_smoke import JobExperience, JobHistory, resolve_sample_file_path, run_provider_matrix
 
 
@@ -103,6 +101,8 @@ def test_run_provider_matrix_requires_citations(monkeypatch, tmp_path: Path) -> 
 
 
 
-def test_resolve_sample_file_path_missing_raises(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError):
-        resolve_sample_file_path(tmp_path / "missing.pdf")
+def test_resolve_sample_file_path_missing_falls_back_to_bundled_sample(tmp_path: Path) -> None:
+    resolved = resolve_sample_file_path(tmp_path / "missing.pdf")
+    assert resolved.exists()
+    assert resolved.name == "functionalsample.pdf"
+    assert "simpleai/samples" in str(resolved)

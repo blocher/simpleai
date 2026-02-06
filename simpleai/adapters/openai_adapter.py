@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from simpleai.adapters.base import BaseAdapter
 from simpleai.exceptions import ProviderError
+from simpleai.schema import openai_response_schema
 from simpleai.types import AdapterResponse, Citation, PromptInput
 
 
@@ -176,7 +177,7 @@ class OpenAIAdapter(BaseAdapter):
                     "format": {
                         "type": "json_schema",
                         "name": "simpleai_output",
-                        "schema": output_format.model_json_schema(),
+                        "schema": openai_response_schema(output_format),
                         "strict": True,
                     }
                 }

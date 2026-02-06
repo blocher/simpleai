@@ -12,6 +12,12 @@ from pydantic import BaseModel
 
 from simpleai.adapters.base import BaseAdapter
 from simpleai.exceptions import ProviderError
+from simpleai.schema import (
+    ANTHROPIC_UNSUPPORTED_SCHEMA_KEYS,
+    anthropic_response_schema,
+    enforce_closed_objects,
+    strip_schema_keywords,
+)
 from simpleai.types import AdapterResponse, Citation, PromptInput
 
 
@@ -49,35 +55,12 @@ class AnthropicAdapter(BaseAdapter):
         return "\n\n".join(str(item) for item in prompt)
 
     def _normalize_schema_for_anthropic(self, schema: dict[str, Any]) -> dict[str, Any]:
-        """Anthropic requires explicit additionalProperties for object schemas."""
+        """Backwards-compatible wrapper for tests and internal call sites."""
 
-        normalized = deepcopy(schema)
-
-        def walk(node: Any) -> None:
-            if isinstance(node, dict):
-                node_type = node.get("type")
-                is_object = node_type == "object" or (
-                    isinstance(node_type, list) and "object" in node_type
-                )
-                # Anthropic requires object schemas to explicitly set additionalProperties=false.
-                # Enforce this even if a non-false value exists (e.g. dict-shaped schemas).
-                looks_objectish = any(
-                    key in node
-                    for key in ("properties", "required", "patternProperties", "additionalProperties")
-                )
-                if is_object or looks_objectish:
-                    node["additionalProperties"] = False
-
-                for value in node.values():
-                    walk(value)
-                return
-
-            if isinstance(node, list):
-                for item in node:
-                    walk(item)
-
-        walk(normalized)
-        return normalized
+        return strip_schema_keywords(
+            enforce_closed_objects(deepcopy(schema)),
+            ANTHROPIC_UNSUPPORTED_SCHEMA_KEYS,
+        )
 
     def _extract_citations(self, response_dict: dict[str, Any]) -> list[Citation]:
         citations: list[Citation] = []
@@ -214,9 +197,7 @@ class AnthropicAdapter(BaseAdapter):
                 payload["output_config"] = {
                     "format": {
                         "type": "json_schema",
-                        "schema": self._normalize_schema_for_anthropic(
-                            output_format.model_json_schema()
-                        ),
+                        "schema": anthropic_response_schema(output_format),
                     }
                 }
 
@@ -228,6 +209,36 @@ class AnthropicAdapter(BaseAdapter):
             text = self._extract_text(response_dict)
 
             citations = self._extract_citations(response_dict) if return_citations else []
+
+            # Anthropic output schemas can omit citation blocks when output_config is active.
+            # If citations were requested but absent, issue a search-only pass to collect them.
+            if return_citations and require_search and output_format is not None and not citations:
+                citation_payload: dict[str, Any] = {
+                    "model": model,
+                    "max_tokens": int(self.provider_settings.get("max_tokens", 4096)),
+                    "messages": self._build_messages(prompt),
+                    "tools": [
+                        {
+                            "name": "web_search",
+                            "type": "web_search_20250305",
+                        }
+                    ],
+                    "tool_choice": {"type": "any"},
+                }
+                if adapter_options:
+                    citation_passthrough = dict(adapter_options)
+                    citation_passthrough.pop("output_config", None)
+                    citation_payload.update(citation_passthrough)
+
+                citation_response = self.client.messages.create(**citation_payload)
+                citation_dict = (
+                    citation_response.model_dump(mode="json")
+                    if hasattr(citation_response, "model_dump")
+                    else {}
+                )
+                for extra in self._extract_citations(citation_dict):
+                    if self._citation_key(extra) not in {self._citation_key(c) for c in citations}:
+                        citations.append(extra)
 
             # If a forced search turn returns only tool blocks (no text), synthesize a final response.
             if not text:
@@ -256,9 +267,7 @@ class AnthropicAdapter(BaseAdapter):
                         synthesis_payload["output_config"] = {
                             "format": {
                                 "type": "json_schema",
-                                "schema": self._normalize_schema_for_anthropic(
-                                    output_format.model_json_schema()
-                                ),
+                                "schema": anthropic_response_schema(output_format),
                             }
                         }
                     if adapter_options:

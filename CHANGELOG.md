@@ -23,9 +23,15 @@ All notable changes to this project will be documented in this file.
   - Gemini: improved grounding/citation extraction from grounding metadata and citation metadata.
   - Grok: migrated from deprecated live search parameters to xAI Agent Tools `web_search`.
 - Fixed Anthropic structured output schema handling by explicitly normalizing JSON Schema object nodes with `additionalProperties: false`.
+- Hardened provider schema compatibility for structured outputs:
+  - OpenAI: enforce closed-object schemas (`additionalProperties: false`) for strict JSON schema mode.
+  - Anthropic: strip unsupported numeric/array constraints (`maxItems`, `minItems`, etc.) from output schemas.
+  - Perplexity: use compatible `response_format` shape and enforce closed-object schemas.
+- Added Perplexity fallback retry path that removes `response_format` and requests raw JSON when provider rejects schema formatting.
 - Added boolean-string coercion for `require_search`, `return_citations`, and `binary_files`.
 - Added Anthropic fallback synthesis pass when a forced web-search turn returns no final text block, preventing downstream JSON parsing failures for structured output.
 - Fixed Django management command argument conflict by removing custom `--no-color` flag (uses Django's built-in global option).
+- Updated smoke runner output to display per-provider file handling path (`binary upload` vs `parsed text`).
 
 ### Added
 - `README_API_KEYS.md` with provider key acquisition/setup instructions.

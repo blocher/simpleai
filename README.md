@@ -238,6 +238,7 @@ The test suite is built to run offline by mocking provider SDK clients.
 This repo includes a manual smoke runner that executes the same resume+search+citations prompt across all providers and prints:
 - per-provider output
 - per-provider citations
+- per-provider file handling mode (`binary upload` vs `parsed text`)
 - final summary with:
   - green `SUCCESS`
   - red `FAILED`

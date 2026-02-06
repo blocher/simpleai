@@ -8,6 +8,7 @@ from typing import Any, Callable, Literal, Sequence
 
 from pydantic import BaseModel, Field
 
+from .adapters import ADAPTER_CLASSES
 from .api import run_prompt
 from .settings import canonical_provider_name, expected_provider_env_vars, get_provider_api_key, load_settings
 
@@ -50,6 +51,7 @@ class ProviderRunResult:
     model_arg: str
     status: Literal["success", "failed", "missing_key"]
     message: str
+    file_handling: str
     job_history: JobHistory | None = None
     citations: list[dict[str, Any]] = field(default_factory=list)
 
@@ -78,7 +80,6 @@ def colorize(text: str, color: str, enabled: bool) -> str:
     return f"{ANSI[color]}{text}{ANSI['reset']}"
 
 
-
 def resolve_sample_file_path(file_path: str | Path | None = None) -> Path:
     """Resolve the sample resume path from explicit input or known defaults."""
 
@@ -105,13 +106,11 @@ def resolve_sample_file_path(file_path: str | Path | None = None) -> Path:
     raise FileNotFoundError(f"Could not find functionalsample.pdf. Checked:\n{searched}")
 
 
-
 def _short_error(exc: Exception) -> str:
     text = str(exc).strip().replace("\n", " ")
     if not text:
         text = exc.__class__.__name__
     return text[:220]
-
 
 
 def _provider_filter(requested: Sequence[str] | None) -> set[str] | None:
@@ -127,7 +126,6 @@ def _provider_filter(requested: Sequence[str] | None) -> set[str] | None:
     return selected
 
 
-
 def _emit_provider_header(
     emit: Callable[[str], None],
     use_color: bool,
@@ -141,6 +139,11 @@ def _emit_provider_header(
     )
     emit("-" * 88)
 
+
+def _file_handling_mode(provider: str) -> str:
+    adapter_cls = ADAPTER_CLASSES.get(provider)
+    supports_binary = bool(getattr(adapter_cls, "supports_binary_files", False))
+    return "binary upload" if supports_binary else "parsed text"
 
 
 def run_provider_matrix(
@@ -162,6 +165,8 @@ def run_provider_matrix(
             continue
 
         _emit_provider_header(emit, use_color, target, file_path)
+        file_handling = _file_handling_mode(target.settings_provider)
+        emit(f"File handling: {file_handling}")
 
         api_key = get_provider_api_key(settings, target.settings_provider)
         if not api_key:
@@ -177,6 +182,7 @@ def run_provider_matrix(
                     model_arg=target.model_arg,
                     status="missing_key",
                     message=msg,
+                    file_handling=file_handling,
                 )
             )
             continue
@@ -186,6 +192,7 @@ def run_provider_matrix(
                 PROMPT,
                 output_format=JobHistory,
                 return_citations="True",
+                binary_files=True,
                 model=target.model_arg,
                 file=str(file_path),
                 settings_file=settings_file,
@@ -227,6 +234,7 @@ def run_provider_matrix(
                         f"Structured output validated; "
                         f"{len(result_obj.latest_job_experiences)} experiences; {len(citations)} citations"
                     ),
+                    file_handling=file_handling,
                     job_history=result_obj,
                     citations=citations,
                 )
@@ -240,6 +248,7 @@ def run_provider_matrix(
                     model_arg=target.model_arg,
                     status="failed",
                     message=msg,
+                    file_handling=file_handling,
                 )
             )
 
@@ -254,6 +263,6 @@ def run_provider_matrix(
             status = colorize("API KEY NOT SET", "yellow", use_color)
         else:
             status = colorize("FAILED", "red", use_color)
-        emit(f"{item.display_name:<12} {status:<20} {item.message}")
+        emit(f"{item.display_name:<12} {status:<20} [{item.file_handling}] {item.message}")
 
     return results

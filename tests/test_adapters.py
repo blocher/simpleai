@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from simpleai.adapters.anthropic_adapter import AnthropicAdapter
 from simpleai.adapters.gemini_adapter import GeminiAdapter
@@ -20,6 +20,10 @@ class OutputModel(BaseModel):
 class OutputWithDictModel(BaseModel):
     value: int
     metadata: dict[str, str]
+
+
+class OutputWithBoundedArrayModel(BaseModel):
+    values: list[int] = Field(min_length=1, max_length=3)
 
 
 def test_openai_adapter_payload_and_citations(tmp_path: Path) -> None:
@@ -104,6 +108,7 @@ def test_openai_adapter_payload_and_citations(tmp_path: Path) -> None:
     assert fake_responses.payload["tool_choice"] == "required"
     assert fake_responses.payload["include"] == ["web_search_call.action.sources"]
     assert fake_responses.payload["text"]["format"]["type"] == "json_schema"
+    assert fake_responses.payload["text"]["format"]["schema"]["additionalProperties"] is False
     assert fake_responses.payload["temperature"] == 0.2
 
 
@@ -186,6 +191,24 @@ def test_anthropic_schema_normalization_forces_nested_additional_properties_fals
     walk(schema)
 
 
+def test_anthropic_schema_normalization_strips_unsupported_array_keywords() -> None:
+    adapter = AnthropicAdapter({"api_key": "test"})
+    schema = adapter._normalize_schema_for_anthropic(OutputWithBoundedArrayModel.model_json_schema())
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            assert "minItems" not in node
+            assert "maxItems" not in node
+            assert "uniqueItems" not in node
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(schema)
+
+
 def test_anthropic_adapter_synthesizes_when_search_turn_has_no_text() -> None:
     class FakeAnthropicResponse:
         def __init__(self, payload: dict[str, Any]) -> None:
@@ -241,6 +264,65 @@ def test_anthropic_adapter_synthesizes_when_search_turn_has_no_text() -> None:
     assert response.text == "{\"value\": 42}"
     assert any(c.url == "https://company.example" for c in response.citations)
     assert len(fake_messages.calls) == 2
+
+
+def test_anthropic_adapter_collects_citations_with_second_pass_when_schema_hides_them() -> None:
+    class FakeAnthropicResponse:
+        def __init__(self, payload: dict[str, Any]) -> None:
+            self._payload = payload
+
+        def model_dump(self, mode: str = "json") -> dict[str, Any]:
+            return self._payload
+
+    class FakeMessages:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                return FakeAnthropicResponse(
+                    {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "{\"value\": 9}",
+                            }
+                        ]
+                    }
+                )
+            return FakeAnthropicResponse(
+                {
+                    "content": [
+                        {
+                            "type": "web_search_tool_result",
+                            "content": [
+                                {"title": "Ref", "url": "https://citation.example"}
+                            ],
+                        }
+                    ]
+                }
+            )
+
+    fake_messages = FakeMessages()
+    adapter = AnthropicAdapter({"api_key": "test", "max_tokens": 100})
+    adapter.client = SimpleNamespace(messages=fake_messages)
+
+    response = adapter.run(
+        prompt="Return JSON and cite sources",
+        model="claude-opus-4-6",
+        require_search=True,
+        return_citations=True,
+        files=None,
+        output_format=OutputModel,
+        adapter_options=None,
+    )
+
+    assert response.text == "{\"value\": 9}"
+    assert any(c.url == "https://citation.example" for c in response.citations)
+    assert len(fake_messages.calls) == 2
+    assert "output_config" in fake_messages.calls[0]
+    assert "output_config" not in fake_messages.calls[1]
 
 
 def test_gemini_adapter_payload_and_citations(tmp_path: Path) -> None:
@@ -453,7 +535,8 @@ def test_perplexity_adapter_payload_and_citations() -> None:
     assert response.text == "perplexity answer"
     assert len(response.citations) == 2
     assert fake_responses.payload["preset"] == "pro-search"
-    assert fake_responses.payload["tools"] == [{"type": "web_search"}]
+    assert "tools" not in fake_responses.payload
+    assert fake_responses.payload["response_format"]["json_schema"]["schema"]["additionalProperties"] is False
 
 
 def test_perplexity_adapter_prefixes_provider_for_raw_model() -> None:
@@ -487,3 +570,40 @@ def test_perplexity_adapter_prefixes_provider_for_raw_model() -> None:
     )
 
     assert fake_responses.payload["model"] == "openai/gpt-5.2"
+
+
+def test_perplexity_adapter_retries_without_response_format_on_invalid_request() -> None:
+    class FakePerplexityResponse:
+        output_text = '{"value": 11}'
+
+        def model_dump(self, mode: str = "json") -> dict[str, Any]:
+            return {"output": []}
+
+    class FakeResponses:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                raise RuntimeError("Error code: 400 - {'error': {'message': 'invalid request'}}")
+            return FakePerplexityResponse()
+
+    fake_responses = FakeResponses()
+    adapter = PerplexityAdapter({"api_key": "test"})
+    adapter.client = SimpleNamespace(responses=fake_responses)
+
+    response = adapter.run(
+        prompt="hello",
+        model="perplexity/deep-research",
+        require_search=True,
+        return_citations=False,
+        files=None,
+        output_format=OutputModel,
+        adapter_options=None,
+    )
+
+    assert response.text == '{"value": 11}'
+    assert len(fake_responses.calls) == 2
+    assert "response_format" in fake_responses.calls[0]
+    assert "response_format" not in fake_responses.calls[1]

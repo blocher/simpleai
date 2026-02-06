@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+import json
 import os
 from pathlib import Path
 from typing import Any, Sequence
@@ -10,6 +12,7 @@ from pydantic import BaseModel
 
 from simpleai.adapters.base import BaseAdapter
 from simpleai.exceptions import ProviderError
+from simpleai.schema import perplexity_response_schema
 from simpleai.types import AdapterResponse, Citation, PromptInput
 
 
@@ -85,6 +88,23 @@ class PerplexityAdapter(BaseAdapter):
 
         return {"model": normalized}
 
+    def _append_json_instruction(
+        self,
+        prompt: PromptInput,
+        schema: dict[str, Any],
+    ) -> PromptInput:
+        instruction = (
+            "Return only valid JSON matching this schema. "
+            "Do not include markdown fences or explanatory text.\n"
+            f"{json.dumps(schema, ensure_ascii=True)}"
+        )
+        if isinstance(prompt, str):
+            return f"{prompt}\n\n{instruction}"
+
+        prompt_list = [str(item) for item in prompt]
+        prompt_list.append(instruction)
+        return prompt_list
+
     def _extract_citations(self, response_dict: dict[str, Any]) -> list[Citation]:
         citations: list[Citation] = []
 
@@ -135,31 +155,57 @@ class PerplexityAdapter(BaseAdapter):
         del files  # unsupported in this adapter; caller should pass extracted text instead
 
         try:
+            target = self._resolve_model_target(model)
             payload: dict[str, Any] = {
                 "input": self._build_input(prompt),
+                **target,
             }
 
-            payload.update(self._resolve_model_target(model))
-
-            if require_search:
+            # Search is implicit in Perplexity presets; avoid redundant tool payload there.
+            if require_search and "model" in target:
                 payload["tools"] = [{"type": "web_search"}]
 
+            schema: dict[str, Any] | None = None
             if output_format is not None:
+                schema = perplexity_response_schema(output_format)
                 payload["response_format"] = {
                     "type": "json_schema",
                     "json_schema": {
-                        "name": "simpleai_output",
-                        "schema": output_format.model_json_schema(),
-                        "strict": True,
+                        "schema": schema,
                     },
                 }
 
             if adapter_options:
                 payload.update(adapter_options)
 
-            response = self.client.responses.create(**payload)
+            response = None
+            try:
+                response = self.client.responses.create(**payload)
+            except Exception as exc:
+                # Retry without response_format for models/presets that reject it.
+                # We still ask for JSON so run_prompt can validate with Pydantic.
+                message = str(exc).lower()
+                is_bad_request = ("400" in message) or ("invalid request" in message) or ("invalid schema" in message)
+                if output_format is None or schema is None or not is_bad_request:
+                    raise
+                retry_payload = deepcopy(payload)
+                retry_payload.pop("response_format", None)
+                retry_payload["input"] = self._build_input(
+                    self._append_json_instruction(prompt, schema)
+                )
+                response = self.client.responses.create(**retry_payload)
+
             response_dict = response.model_dump(mode="json") if hasattr(response, "model_dump") else {}
             text = getattr(response, "output_text", "") or ""
+            if not text and response_dict:
+                chunks: list[str] = []
+                for output in response_dict.get("output", []):
+                    if output.get("type") != "message":
+                        continue
+                    for part in output.get("content", []):
+                        if part.get("type") == "output_text":
+                            chunks.append(part.get("text", ""))
+                text = "".join(chunks)
 
             citations = self._extract_citations(response_dict) if return_citations else []
             return AdapterResponse(text=text, citations=citations, raw=response_dict)
