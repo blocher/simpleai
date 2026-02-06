@@ -53,7 +53,13 @@ class AnthropicAdapter(BaseAdapter):
                 is_object = node_type == "object" or (
                     isinstance(node_type, list) and "object" in node_type
                 )
-                if is_object and "additionalProperties" not in node:
+                # Anthropic requires object schemas to explicitly set additionalProperties=false.
+                # Enforce this even if a non-false value exists (e.g. dict-shaped schemas).
+                looks_objectish = any(
+                    key in node
+                    for key in ("properties", "required", "patternProperties", "additionalProperties")
+                )
+                if is_object or looks_objectish:
                     node["additionalProperties"] = False
 
                 for value in node.values():

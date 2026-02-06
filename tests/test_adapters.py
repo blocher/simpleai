@@ -17,6 +17,11 @@ class OutputModel(BaseModel):
     value: int
 
 
+class OutputWithDictModel(BaseModel):
+    value: int
+    metadata: dict[str, str]
+
+
 def test_openai_adapter_payload_and_citations(tmp_path: Path) -> None:
     upload_file = tmp_path / "data.txt"
     upload_file.write_text("hello", encoding="utf-8")
@@ -154,6 +159,31 @@ def test_anthropic_adapter_payload_and_citations() -> None:
         is False
     )
     assert fake_messages.payload["temperature"] == 0.1
+
+
+def test_anthropic_schema_normalization_forces_nested_additional_properties_false() -> None:
+    adapter = AnthropicAdapter({"api_key": "test"})
+
+    schema = adapter._normalize_schema_for_anthropic(OutputWithDictModel.model_json_schema())
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            node_type = node.get("type")
+            is_object = node_type == "object" or (
+                isinstance(node_type, list) and "object" in node_type
+            )
+            looks_objectish = any(
+                key in node for key in ("properties", "required", "patternProperties", "additionalProperties")
+            )
+            if is_object or looks_objectish:
+                assert node.get("additionalProperties") is False
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(schema)
 
 
 def test_gemini_adapter_payload_and_citations(tmp_path: Path) -> None:
