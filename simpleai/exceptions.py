@@ -3,8 +3,21 @@
 from __future__ import annotations
 
 
-class SimpleAIError(Exception):
-    """Base error for SimpleAI."""
+class SimpleAIException(Exception):
+    """Catch-all exception for errors surfaced by `run_prompt`."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        original_exception: BaseException | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.original_exception = original_exception
+
+
+class SimpleAIError(SimpleAIException):
+    """Base error for SimpleAI (backward-compatible alias)."""
 
 
 class SettingsError(SimpleAIError):

@@ -34,6 +34,7 @@ All notable changes to this project will be documented in this file.
 - Added Anthropic fallback synthesis pass when a forced web-search turn returns no final text block, preventing downstream JSON parsing failures for structured output.
 - Fixed Django management command argument conflict by removing custom `--no-color` flag (uses Django's built-in global option).
 - Updated smoke runner output to display per-provider file handling path (`binary upload` vs `parsed text`).
+- Added catch-all `SimpleAIException` surface for `run_prompt`; unexpected internal errors are now wrapped and retain `original_exception` for debugging.
 
 ### Added
 - `README_API_KEYS.md` with provider key acquisition/setup instructions.

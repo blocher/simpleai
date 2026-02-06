@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from .adapters import get_adapter
 from .adapters.logging_adapter import PromptLogger
-from .exceptions import ProviderError, SettingsError
+from .exceptions import ProviderError, SettingsError, SimpleAIException
 from .files import collect_file_paths, extract_text_from_files
 from .model_registry import resolve_provider_and_model
 from .settings import expected_provider_env_vars, get_provider_api_key, load_settings
@@ -112,119 +112,126 @@ def run_prompt(
         Plain text or validated Pydantic object.
         If return_citations is True, returns (result, citations).
     """
+    try:
+        require_search_bool = bool(_coerce_bool(require_search, name="require_search", allow_none=False))
+        return_citations_bool = _coerce_bool(return_citations, name="return_citations", allow_none=True)
+        binary_files_bool = bool(_coerce_bool(binary_files, name="binary_files", allow_none=False))
 
-    require_search_bool = bool(_coerce_bool(require_search, name="require_search", allow_none=False))
-    return_citations_bool = _coerce_bool(return_citations, name="return_citations", allow_none=True)
-    binary_files_bool = bool(_coerce_bool(binary_files, name="binary_files", allow_none=False))
-
-    effective_return_citations = (
-        require_search_bool if return_citations_bool is None else bool(return_citations_bool)
-    )
-    # Citations require grounded search context; citations always force search on.
-    effective_require_search = require_search_bool or effective_return_citations
-
-    settings = load_settings(settings_file)
-    provider, resolved_model = resolve_provider_and_model(settings, model)
-
-    providers = settings.get("providers", {})
-    provider_settings = providers.get(provider, {}) if isinstance(providers, dict) else {}
-    if not isinstance(provider_settings, dict):
-        raise SettingsError(f"Invalid settings for provider '{provider}'.")
-
-    if provider_settings.get("api_key") is None:
-        provider_settings = dict(provider_settings)
-        provider_settings["api_key"] = get_provider_api_key(settings, provider)
-
-    if not provider_settings.get("api_key"):
-        env_vars = expected_provider_env_vars(provider)
-        env_hint = ", ".join(env_vars) if env_vars else "provider-specific env var"
-        raise SettingsError(
-            f"Missing API key for provider '{provider}'. "
-            f"Set providers.{provider}.api_key or one of: {env_hint}."
+        effective_return_citations = (
+            require_search_bool if return_citations_bool is None else bool(return_citations_bool)
         )
+        # Citations require grounded search context; citations always force search on.
+        effective_require_search = require_search_bool or effective_return_citations
 
-    adapter = get_adapter(provider, provider_settings)
+        settings = load_settings(settings_file)
+        provider, resolved_model = resolve_provider_and_model(settings, model)
 
-    # File handling: binary upload if supported; otherwise append extracted text.
-    prompt_payload: PromptInput = prompt
-    adapter_files: list[Path] | None = None
-    file_paths = collect_file_paths(file=file, files=files)
-    if file_paths:
-        if binary_files_bool and adapter.supports_binary_files:
-            adapter_files = file_paths
-        else:
-            extracted = extract_text_from_files(file_paths)
-            prompt_payload = _append_extracted_files_to_prompt(
-                prompt_payload,
-                ((item.path, item.text) for item in extracted),
+        providers = settings.get("providers", {})
+        provider_settings = providers.get(provider, {}) if isinstance(providers, dict) else {}
+        if not isinstance(provider_settings, dict):
+            raise SettingsError(f"Invalid settings for provider '{provider}'.")
+
+        if provider_settings.get("api_key") is None:
+            provider_settings = dict(provider_settings)
+            provider_settings["api_key"] = get_provider_api_key(settings, provider)
+
+        if not provider_settings.get("api_key"):
+            env_vars = expected_provider_env_vars(provider)
+            env_hint = ", ".join(env_vars) if env_vars else "provider-specific env var"
+            raise SettingsError(
+                f"Missing API key for provider '{provider}'. "
+                f"Set providers.{provider}.api_key or one of: {env_hint}."
             )
 
-    logger = PromptLogger(settings.get("logging", {}))
-    started_at = time.time()
+        adapter = get_adapter(provider, provider_settings)
 
-    combined_adapter_options: dict[str, Any] = {}
-    if adapter_options:
-        combined_adapter_options.update(adapter_options)
-    combined_adapter_options.update(provider_kwargs)
+        # File handling: binary upload if supported; otherwise append extracted text.
+        prompt_payload: PromptInput = prompt
+        adapter_files: list[Path] | None = None
+        file_paths = collect_file_paths(file=file, files=files)
+        if file_paths:
+            if binary_files_bool and adapter.supports_binary_files:
+                adapter_files = file_paths
+            else:
+                extracted = extract_text_from_files(file_paths)
+                prompt_payload = _append_extracted_files_to_prompt(
+                    prompt_payload,
+                    ((item.path, item.text) for item in extracted),
+                )
 
-    event_id = logger.log_start(
-        args=_build_log_args(
-            prompt=prompt,
-            require_search=effective_require_search,
-            return_citations=effective_return_citations,
-            file=file,
-            files=files,
-            binary_files=binary_files_bool,
-            model=model,
-            output_format=output_format,
-            provider_kwargs=provider_kwargs,
-        ),
-        adapter_payload={
-            "provider": provider,
-            "model": resolved_model,
-            "require_search": effective_require_search,
-            "return_citations": effective_return_citations,
-            "binary_files": binary_files_bool,
-            "adapter_supports_binary": adapter.supports_binary_files,
-            "file_count": len(file_paths),
-            "params": combined_adapter_options,
-        },
-    )
+        logger = PromptLogger(settings.get("logging", {}))
+        started_at = time.time()
 
-    try:
-        adapter_response = adapter.run(
-            prompt=prompt_payload,
-            model=resolved_model,
-            require_search=effective_require_search,
-            return_citations=effective_return_citations,
-            files=adapter_files,
-            output_format=output_format,
-            adapter_options=combined_adapter_options or None,
-        )
-    except Exception as exc:
-        logger.log_error(
-            event_id=event_id,
-            started_at=started_at,
-            error=exc,
-            context={
+        combined_adapter_options: dict[str, Any] = {}
+        if adapter_options:
+            combined_adapter_options.update(adapter_options)
+        combined_adapter_options.update(provider_kwargs)
+
+        event_id = logger.log_start(
+            args=_build_log_args(
+                prompt=prompt,
+                require_search=effective_require_search,
+                return_citations=effective_return_citations,
+                file=file,
+                files=files,
+                binary_files=binary_files_bool,
+                model=model,
+                output_format=output_format,
+                provider_kwargs=provider_kwargs,
+            ),
+            adapter_payload={
                 "provider": provider,
                 "model": resolved_model,
+                "require_search": effective_require_search,
+                "return_citations": effective_return_citations,
+                "binary_files": binary_files_bool,
+                "adapter_supports_binary": adapter.supports_binary_files,
+                "file_count": len(file_paths),
+                "params": combined_adapter_options,
             },
         )
-        if isinstance(exc, ProviderError):
+
+        try:
+            adapter_response = adapter.run(
+                prompt=prompt_payload,
+                model=resolved_model,
+                require_search=effective_require_search,
+                return_citations=effective_return_citations,
+                files=adapter_files,
+                output_format=output_format,
+                adapter_options=combined_adapter_options or None,
+            )
+        except Exception as exc:
+            logger.log_error(
+                event_id=event_id,
+                started_at=started_at,
+                error=exc,
+                context={
+                    "provider": provider,
+                    "model": resolved_model,
+                },
+            )
+            if isinstance(exc, ProviderError):
+                raise
+            raise ProviderError(f"Provider '{provider}' failed: {exc}") from exc
+
+        result = coerce_output(adapter_response.text, output_format)
+        citations = [item.to_dict() for item in adapter_response.citations]
+
+        logger.log_end(
+            event_id=event_id,
+            started_at=started_at,
+            result_preview=adapter_response.text,
+            citations_count=len(citations),
+        )
+
+        if effective_return_citations:
+            return result, citations
+        return result
+    except Exception as exc:
+        if isinstance(exc, SimpleAIException):
             raise
-        raise ProviderError(f"Provider '{provider}' failed: {exc}") from exc
-
-    result = coerce_output(adapter_response.text, output_format)
-    citations = [item.to_dict() for item in adapter_response.citations]
-
-    logger.log_end(
-        event_id=event_id,
-        started_at=started_at,
-        result_preview=adapter_response.text,
-        citations_count=len(citations),
-    )
-
-    if effective_return_citations:
-        return result, citations
-    return result
+        raise SimpleAIException(
+            f"run_prompt failed: {exc.__class__.__name__}: {exc}",
+            original_exception=exc,
+        ) from exc

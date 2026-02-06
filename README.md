@@ -96,6 +96,24 @@ def run_prompt(
 - Default: `str` or validated Pydantic model instance (when `output_format` is provided).
 - If citations requested: `(result, citations)` tuple.
 
+### Error handling
+
+`run_prompt` always raises `SimpleAIException` (or one of its subclasses) for failures, so you can catch all runtime/config/provider errors with one exception type.
+
+```python
+from simpleai import run_prompt, SimpleAIException
+
+try:
+    result = run_prompt("Hello", model="openai")
+except SimpleAIException as exc:
+    # Full original exception is preserved for debugging.
+    print(exc)
+    print(exc.original_exception)
+    raise
+```
+
+Specific exception subclasses (for targeted handling) are still available from `simpleai.exceptions`, for example `SettingsError` and `ProviderError`.
+
 `citations` is a normalized list of dicts with common keys like:
 - `provider`
 - `url`
