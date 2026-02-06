@@ -17,6 +17,11 @@ All notable changes to this project will be documented in this file.
 - Added API-key preflight validation in `run_prompt` with clearer `SettingsError` messages, and added env-var aliases (`GROK_API_KEY`, `PPLX_API_KEY`, etc.).
 - Added `xai` as a provider alias equivalent to `grok` (including settings normalization and model alias resolution).
 - Updated `run_prompt` so `return_citations=True` always forces `require_search=True`, even when `require_search=False` is passed.
+- Updated citation/search implementations across adapters:
+  - OpenAI: switched to `web_search` tool with required tool usage and source extraction.
+  - Anthropic: forced web search tool usage for grounded responses and improved citation parsing.
+  - Gemini: improved grounding/citation extraction from grounding metadata and citation metadata.
+  - Grok: migrated from deprecated live search parameters to xAI Agent Tools `web_search`.
 
 ### Added
 - `README_API_KEYS.md` with provider key acquisition/setup instructions.

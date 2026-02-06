@@ -23,16 +23,21 @@ class GrokAdapter(BaseAdapter):
         try:
             from xai_sdk import Client
             from xai_sdk import chat as chat_helpers
-            from xai_sdk.search import SearchParameters
+            from xai_sdk import tools as xai_tools
         except Exception as exc:  # pragma: no cover - dependency missing path
             raise ProviderError("xai-sdk package is required for GrokAdapter.") from exc
 
-        api_key = provider_settings.get("api_key") or os.getenv("XAI_API_KEY")
+        api_key = provider_settings.get("api_key") or os.getenv("XAI_API_KEY") or os.getenv("GROK_API_KEY")
         self.client = Client(api_key=api_key)
         self.chat_helpers = chat_helpers
-        self.SearchParameters = SearchParameters
+        self.xai_tools = xai_tools
 
-    def _build_messages(self, prompt: PromptInput, files: Sequence[Path] | None) -> list[Any]:
+    def _build_messages(
+        self,
+        prompt: PromptInput,
+        files: Sequence[Path] | None,
+        require_search: bool,
+    ) -> list[Any]:
         attachments: list[Any] = []
         if files:
             for path in files:
@@ -40,6 +45,13 @@ class GrokAdapter(BaseAdapter):
                 attachments.append(self.chat_helpers.file(uploaded.id))
 
         messages: list[Any] = []
+        if require_search:
+            messages.append(
+                self.chat_helpers.system(
+                    "You must use the web_search tool before answering and ground your response in cited sources."
+                )
+            )
+
         if isinstance(prompt, str):
             contents = [prompt]
             contents.extend(attachments)
@@ -142,19 +154,20 @@ class GrokAdapter(BaseAdapter):
         try:
             create_kwargs: dict[str, Any] = {
                 "model": model,
-                "messages": self._build_messages(prompt, files),
+                "messages": self._build_messages(prompt, files, require_search=require_search),
                 "max_tokens": int(self.provider_settings.get("max_tokens", 8192)),
             }
 
-            if require_search or return_citations:
-                mode = "on" if require_search else "auto"
-                create_kwargs["search_parameters"] = self.SearchParameters(
-                    mode=mode,
-                    return_citations=return_citations,
-                )
+            if require_search:
+                create_kwargs["tools"] = [self.xai_tools.web_search()]
+                create_kwargs["tool_choice"] = "required"
+                create_kwargs["max_turns"] = int(self.provider_settings.get("max_turns", 4))
 
             if return_citations:
-                create_kwargs["include"] = ["inline_citations"]
+                include = ["inline_citations"]
+                if require_search:
+                    include.append("web_search_call_output")
+                create_kwargs["include"] = include
 
             if output_format is not None:
                 create_kwargs["response_format"] = output_format

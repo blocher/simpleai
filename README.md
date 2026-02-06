@@ -194,10 +194,10 @@ When enabled, each `run_prompt` call logs:
 ## Provider adapters
 
 Adapters are in `simpleai/adapters/`:
-- `openai_adapter.py` (OpenAI Responses API)
-- `anthropic_adapter.py` (Anthropic Messages API)
-- `gemini_adapter.py` (`google-genai`)
-- `grok_adapter.py` (`xai-sdk`)
+- `openai_adapter.py` (OpenAI Responses API + `web_search` tool)
+- `anthropic_adapter.py` (Anthropic Messages API + `web_search_20250305` tool)
+- `gemini_adapter.py` (`google-genai` + `GoogleSearch` tool)
+- `grok_adapter.py` (`xai-sdk` Agent Tools API + `web_search` tool)
 - `perplexity_adapter.py` (Perplexity Responses API)
 
 ## Example usage

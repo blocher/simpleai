@@ -28,6 +28,14 @@ def test_openai_adapter_payload_and_citations(tmp_path: Path) -> None:
             return {
                 "output": [
                     {
+                        "type": "web_search_call",
+                        "action": {
+                            "sources": [
+                                {"url": "https://source.example", "title": "Source Title", "type": "web_page"}
+                            ]
+                        },
+                    },
+                    {
                         "type": "message",
                         "content": [
                             {
@@ -36,10 +44,12 @@ def test_openai_adapter_payload_and_citations(tmp_path: Path) -> None:
                                 "annotations": [
                                     {
                                         "type": "url_citation",
-                                        "url": "https://example.com",
-                                        "title": "Example",
-                                        "start_index": 0,
-                                        "end_index": 2,
+                                        "url_citation": {
+                                            "url": "https://example.com",
+                                            "title": "Example",
+                                            "start_index": 0,
+                                            "end_index": 2,
+                                        },
                                     }
                                 ],
                             }
@@ -82,8 +92,12 @@ def test_openai_adapter_payload_and_citations(tmp_path: Path) -> None:
     )
 
     assert response.text == "ok"
-    assert response.citations[0].url == "https://example.com"
-    assert fake_responses.payload["tools"] == [{"type": "web_search_preview"}]
+    urls = {c.url for c in response.citations}
+    assert "https://example.com" in urls
+    assert "https://source.example" in urls
+    assert fake_responses.payload["tools"] == [{"type": "web_search"}]
+    assert fake_responses.payload["tool_choice"] == "required"
+    assert fake_responses.payload["include"] == ["web_search_call.action.sources"]
     assert fake_responses.payload["text"]["format"]["type"] == "json_schema"
     assert fake_responses.payload["temperature"] == 0.2
 
@@ -133,6 +147,7 @@ def test_anthropic_adapter_payload_and_citations() -> None:
     assert response.text == "done"
     assert response.citations[0].url == "https://claude.ai"
     assert fake_messages.payload["tools"][0]["type"] == "web_search_20250305"
+    assert fake_messages.payload["tool_choice"] == {"type": "any"}
     assert fake_messages.payload["output_config"]["format"]["type"] == "json_schema"
     assert fake_messages.payload["temperature"] == 0.1
 
@@ -197,6 +212,9 @@ def test_gemini_adapter_payload_and_citations(tmp_path: Path) -> None:
     assert response.text == "gemini answer"
     assert response.citations[0].url == "https://gemini.example"
     assert fake_models.payload["model"] == "gemini-2.5-pro"
+    assert fake_models.payload["config"].system_instruction == (
+        "Use Google Search to ground your answer and provide citations to sources."
+    )
 
 
 def test_grok_adapter_payload_and_citations(tmp_path: Path) -> None:
@@ -235,25 +253,30 @@ def test_grok_adapter_payload_and_citations(tmp_path: Path) -> None:
         def upload(self, file_path: str):
             return SimpleNamespace(id=f"file::{file_path}")
 
-    class FakeSearchParameters:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
     class FakeChatHelpers:
         @staticmethod
         def file(file_id: str):
             return f"file:{file_id}"
 
         @staticmethod
+        def system(text: str):
+            return {"role": "system", "parts": [text]}
+
+        @staticmethod
         def user(*parts):
             return {"role": "user", "parts": list(parts)}
+
+    class FakeTools:
+        @staticmethod
+        def web_search():
+            return "web_search_tool"
 
     fake_chat = FakeChatClient()
 
     adapter = GrokAdapter({"api_key": "test", "max_tokens": 256})
     adapter.client = SimpleNamespace(chat=fake_chat, files=FakeFilesClient())
     adapter.chat_helpers = FakeChatHelpers()
-    adapter.SearchParameters = FakeSearchParameters
+    adapter.xai_tools = FakeTools()
 
     response = adapter.run(
         prompt="hello",
@@ -268,6 +291,10 @@ def test_grok_adapter_payload_and_citations(tmp_path: Path) -> None:
     assert response.text == "grok answer"
     assert response.citations[0].source == "https://grok.example"
     assert fake_chat.payload["model"] == "grok-4-latest"
+    assert fake_chat.payload["tools"] == ["web_search_tool"]
+    assert fake_chat.payload["tool_choice"] == "required"
+    assert fake_chat.payload["max_turns"] == 4
+    assert fake_chat.payload["include"] == ["inline_citations", "web_search_call_output"]
     assert fake_chat.payload["temperature"] == 0.4
 
 

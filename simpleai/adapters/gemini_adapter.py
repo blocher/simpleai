@@ -26,7 +26,7 @@ class GeminiAdapter(BaseAdapter):
         except Exception as exc:  # pragma: no cover - dependency missing path
             raise ProviderError("google-genai package is required for GeminiAdapter.") from exc
 
-        api_key = provider_settings.get("api_key") or os.getenv("GEMINI_API_KEY")
+        api_key = provider_settings.get("api_key") or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         self.client = genai.Client(api_key=api_key)
         self.types = types
 
@@ -49,21 +49,91 @@ class GeminiAdapter(BaseAdapter):
 
     def _extract_citations(self, response_dict: dict[str, Any]) -> list[Citation]:
         citations: list[Citation] = []
+        seen: set[tuple[Any, ...]] = set()
+
+        def append_citation(
+            *,
+            url: str | None,
+            title: str | None,
+            source: str | None,
+            snippet: str | None,
+            start_index: int | None = None,
+            end_index: int | None = None,
+            raw: dict[str, Any],
+        ) -> None:
+            key = (url, title, source, snippet, start_index, end_index)
+            if key in seen:
+                return
+            seen.add(key)
+            citations.append(
+                Citation(
+                    provider=self.provider_name,
+                    url=url,
+                    title=title,
+                    source=source,
+                    snippet=snippet,
+                    start_index=start_index,
+                    end_index=end_index,
+                    raw=raw,
+                )
+            )
 
         for candidate in response_dict.get("candidates", []):
-            grounding = candidate.get("grounding_metadata") or {}
-            for chunk in grounding.get("grounding_chunks") or []:
+            # Citation metadata (inline offsets + URI/title).
+            citation_meta = candidate.get("citation_metadata") or candidate.get("citationMetadata") or {}
+            for item in citation_meta.get("citations") or []:
+                append_citation(
+                    url=item.get("uri"),
+                    title=item.get("title"),
+                    source=item.get("uri"),
+                    snippet=None,
+                    start_index=item.get("start_index") or item.get("startIndex"),
+                    end_index=item.get("end_index") or item.get("endIndex"),
+                    raw=item,
+                )
+
+            # Grounding metadata from Google Search tool.
+            grounding = candidate.get("grounding_metadata") or candidate.get("groundingMetadata") or {}
+            chunks = grounding.get("grounding_chunks") or grounding.get("groundingChunks") or []
+            for chunk in chunks:
                 web = chunk.get("web") or {}
-                if not web:
-                    continue
-                citations.append(
-                    Citation(
-                        provider=self.provider_name,
-                        url=web.get("uri"),
+                if web:
+                    append_citation(
+                        url=web.get("uri") or web.get("url"),
                         title=web.get("title"),
-                        source=web.get("domain"),
+                        source=web.get("domain") or web.get("uri") or web.get("url"),
+                        snippet=None,
                         raw=chunk,
                     )
+
+                retrieved = chunk.get("retrieved_context") or chunk.get("retrievedContext") or {}
+                if retrieved:
+                    append_citation(
+                        url=retrieved.get("uri"),
+                        title=retrieved.get("title") or retrieved.get("document_name") or retrieved.get("documentName"),
+                        source=retrieved.get("document_name") or retrieved.get("documentName") or retrieved.get("uri"),
+                        snippet=retrieved.get("text"),
+                        raw=chunk,
+                    )
+
+                maps = chunk.get("maps") or {}
+                if maps:
+                    append_citation(
+                        url=maps.get("uri"),
+                        title=maps.get("title"),
+                        source="google_maps",
+                        snippet=maps.get("text"),
+                        raw=chunk,
+                    )
+
+            # Query metadata can still be useful provenance even when chunks are absent.
+            for query in grounding.get("web_search_queries") or grounding.get("webSearchQueries") or []:
+                append_citation(
+                    url=None,
+                    title=None,
+                    source="google_search_query",
+                    snippet=str(query),
+                    raw={"query": query},
                 )
 
         return citations
@@ -88,6 +158,10 @@ class GeminiAdapter(BaseAdapter):
                 config_kwargs["tools"] = [
                     self.types.Tool(google_search=self.types.GoogleSearch())
                 ]
+                config_kwargs.setdefault(
+                    "system_instruction",
+                    "Use Google Search to ground your answer and provide citations to sources.",
+                )
 
             if output_format is not None:
                 config_kwargs["response_mime_type"] = "application/json"

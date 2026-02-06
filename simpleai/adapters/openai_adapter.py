@@ -68,26 +68,76 @@ class OpenAIAdapter(BaseAdapter):
 
     def _extract_citations(self, response_dict: dict[str, Any]) -> list[Citation]:
         citations: list[Citation] = []
+        seen: set[tuple[Any, ...]] = set()
 
+        def append_citation(
+            *,
+            url: str | None,
+            title: str | None,
+            source: str | None,
+            start_index: int | None,
+            end_index: int | None,
+            raw: dict[str, Any],
+        ) -> None:
+            key = (url, title, source, start_index, end_index)
+            if key in seen:
+                return
+            seen.add(key)
+            citations.append(
+                Citation(
+                    provider=self.provider_name,
+                    url=url,
+                    title=title,
+                    source=source,
+                    start_index=start_index,
+                    end_index=end_index,
+                    raw=raw,
+                )
+            )
+
+        # 1) Message text annotations (inline citations in generated text).
         for output in response_dict.get("output", []):
             if output.get("type") != "message":
                 continue
 
             for part in output.get("content", []):
                 for annotation in part.get("annotations") or []:
-                    url = annotation.get("url")
-                    title = annotation.get("title")
-                    citations.append(
-                        Citation(
-                            provider=self.provider_name,
-                            url=url,
-                            title=title,
-                            source=url,
-                            start_index=annotation.get("start_index"),
-                            end_index=annotation.get("end_index"),
-                            raw=annotation,
-                        )
+                    url_citation = annotation.get("url_citation") or {}
+                    url = annotation.get("url") or url_citation.get("url")
+                    title = annotation.get("title") or url_citation.get("title")
+                    start_index = annotation.get("start_index")
+                    if start_index is None:
+                        start_index = url_citation.get("start_index")
+                    end_index = annotation.get("end_index")
+                    if end_index is None:
+                        end_index = url_citation.get("end_index")
+
+                    append_citation(
+                        url=url,
+                        title=title,
+                        source=url,
+                        start_index=start_index,
+                        end_index=end_index,
+                        raw=annotation,
                     )
+
+        # 2) Full source list from web_search_call output (when include contains sources).
+        for output in response_dict.get("output", []):
+            if output.get("type") != "web_search_call":
+                continue
+            action = output.get("action") or {}
+            for src in action.get("sources") or []:
+                url = src.get("url")
+                title = src.get("title")
+                source_type = src.get("type") or src.get("source")
+                append_citation(
+                    url=url,
+                    title=title,
+                    source=source_type or url,
+                    start_index=None,
+                    end_index=None,
+                    raw=src,
+                )
 
         return citations
 
@@ -116,7 +166,10 @@ class OpenAIAdapter(BaseAdapter):
             }
 
             if require_search:
-                payload["tools"] = [{"type": "web_search_preview"}]
+                payload["tools"] = [{"type": "web_search"}]
+                payload["tool_choice"] = "required"
+                if return_citations:
+                    payload["include"] = ["web_search_call.action.sources"]
 
             if output_format is not None:
                 payload["text"] = {

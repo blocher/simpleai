@@ -25,7 +25,7 @@ class AnthropicAdapter(BaseAdapter):
         except Exception as exc:  # pragma: no cover - dependency missing path
             raise ProviderError("anthropic package is required for AnthropicAdapter.") from exc
 
-        api_key = provider_settings.get("api_key") or os.getenv("ANTHROPIC_API_KEY")
+        api_key = provider_settings.get("api_key") or os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY")
         self.client = Anthropic(api_key=api_key)
 
     def _build_messages(self, prompt: PromptInput) -> list[dict[str, Any]]:
@@ -43,31 +43,58 @@ class AnthropicAdapter(BaseAdapter):
 
     def _extract_citations(self, response_dict: dict[str, Any]) -> list[Citation]:
         citations: list[Citation] = []
+        seen: set[tuple[Any, ...]] = set()
+
+        def append_citation(
+            *,
+            url: str | None,
+            title: str | None,
+            source: str | None,
+            snippet: str | None,
+            raw: dict[str, Any],
+        ) -> None:
+            key = (url, title, source, snippet)
+            if key in seen:
+                return
+            seen.add(key)
+            citations.append(
+                Citation(
+                    provider=self.provider_name,
+                    url=url,
+                    title=title,
+                    source=source,
+                    snippet=snippet,
+                    raw=raw,
+                )
+            )
 
         for block in response_dict.get("content", []):
             if block.get("type") == "text":
                 for item in block.get("citations") or []:
-                    citations.append(
-                        Citation(
-                            provider=self.provider_name,
-                            url=item.get("url"),
-                            title=item.get("title"),
-                            source=item.get("url"),
-                            snippet=item.get("cited_text"),
-                            raw=item,
-                        )
+                    source_obj = item.get("source") or {}
+                    if not isinstance(source_obj, dict):
+                        source_obj = {"source": source_obj}
+                    url = item.get("url") or source_obj.get("url")
+                    title = item.get("title") or source_obj.get("title")
+                    source = url or source_obj.get("source")
+                    append_citation(
+                        url=url,
+                        title=title,
+                        source=source,
+                        snippet=item.get("cited_text"),
+                        raw=item,
                     )
 
             if block.get("type") == "web_search_tool_result":
-                for result in block.get("content") or []:
-                    citations.append(
-                        Citation(
-                            provider=self.provider_name,
-                            url=result.get("url"),
-                            title=result.get("title"),
-                            source=result.get("url"),
-                            raw=result,
-                        )
+                raw_content = block.get("content") or []
+                items = [raw_content] if isinstance(raw_content, dict) else raw_content
+                for result in items:
+                    append_citation(
+                        url=result.get("url"),
+                        title=result.get("title"),
+                        source=result.get("url"),
+                        snippet=None,
+                        raw=result,
                     )
 
         return citations
@@ -99,6 +126,7 @@ class AnthropicAdapter(BaseAdapter):
                         "type": "web_search_20250305",
                     }
                 ]
+                payload["tool_choice"] = {"type": "any"}
 
             if output_format is not None:
                 payload["output_config"] = {

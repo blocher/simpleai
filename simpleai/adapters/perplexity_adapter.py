@@ -37,7 +37,11 @@ class PerplexityAdapter(BaseAdapter):
         except Exception as exc:  # pragma: no cover - dependency missing path
             raise ProviderError("perplexityai package is required for PerplexityAdapter.") from exc
 
-        api_key = provider_settings.get("api_key") or os.getenv("PERPLEXITY_API_KEY")
+        api_key = (
+            provider_settings.get("api_key")
+            or os.getenv("PERPLEXITY_API_KEY")
+            or os.getenv("PPLX_API_KEY")
+        )
         self.client = Perplexity(api_key=api_key)
 
     def _build_input(self, prompt: PromptInput) -> str | list[dict[str, Any]]:
