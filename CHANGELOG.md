@@ -22,6 +22,8 @@ All notable changes to this project will be documented in this file.
   - Anthropic: forced web search tool usage for grounded responses and improved citation parsing.
   - Gemini: improved grounding/citation extraction from grounding metadata and citation metadata.
   - Grok: migrated from deprecated live search parameters to xAI Agent Tools `web_search`.
+- Fixed Anthropic structured output schema handling by explicitly normalizing JSON Schema object nodes with `additionalProperties: false`.
+- Added boolean-string coercion for `require_search`, `return_citations`, and `binary_files`.
 
 ### Added
 - `README_API_KEYS.md` with provider key acquisition/setup instructions.

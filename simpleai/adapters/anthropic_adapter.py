@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import os
 from pathlib import Path
 from typing import Any, Sequence
@@ -40,6 +41,31 @@ class AnthropicAdapter(BaseAdapter):
             messages.append({"role": "user", "content": [{"type": "text", "text": ""}]})
 
         return messages
+
+    def _normalize_schema_for_anthropic(self, schema: dict[str, Any]) -> dict[str, Any]:
+        """Anthropic requires explicit additionalProperties for object schemas."""
+
+        normalized = deepcopy(schema)
+
+        def walk(node: Any) -> None:
+            if isinstance(node, dict):
+                node_type = node.get("type")
+                is_object = node_type == "object" or (
+                    isinstance(node_type, list) and "object" in node_type
+                )
+                if is_object and "additionalProperties" not in node:
+                    node["additionalProperties"] = False
+
+                for value in node.values():
+                    walk(value)
+                return
+
+            if isinstance(node, list):
+                for item in node:
+                    walk(item)
+
+        walk(normalized)
+        return normalized
 
     def _extract_citations(self, response_dict: dict[str, Any]) -> list[Citation]:
         citations: list[Citation] = []
@@ -132,7 +158,9 @@ class AnthropicAdapter(BaseAdapter):
                 payload["output_config"] = {
                     "format": {
                         "type": "json_schema",
-                        "schema": output_format.model_json_schema(),
+                        "schema": self._normalize_schema_for_anthropic(
+                            output_format.model_json_schema()
+                        ),
                     }
                 }
 

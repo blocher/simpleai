@@ -149,6 +149,10 @@ def test_anthropic_adapter_payload_and_citations() -> None:
     assert fake_messages.payload["tools"][0]["type"] == "web_search_20250305"
     assert fake_messages.payload["tool_choice"] == {"type": "any"}
     assert fake_messages.payload["output_config"]["format"]["type"] == "json_schema"
+    assert (
+        fake_messages.payload["output_config"]["format"]["schema"]["additionalProperties"]
+        is False
+    )
     assert fake_messages.payload["temperature"] == 0.1
 
 

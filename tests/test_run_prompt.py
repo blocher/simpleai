@@ -93,6 +93,20 @@ def test_return_citations_true_forces_require_search_even_if_false(monkeypatch) 
     assert adapter.last_kwargs["return_citations"] is True
 
 
+def test_run_prompt_accepts_string_bool_for_return_citations(monkeypatch) -> None:
+    adapter = DummyAdapter()
+
+    monkeypatch.setattr("simpleai.api.load_settings", lambda settings_file=None: BASE_SETTINGS)
+    monkeypatch.setattr("simpleai.api.resolve_provider_and_model", lambda settings, model: ("openai", "gpt-5"))
+    monkeypatch.setattr("simpleai.api.get_adapter", lambda provider, provider_settings: adapter)
+
+    result, citations = run_prompt("hello", model="openai", return_citations="True")
+    assert isinstance(result, str)
+    assert len(citations) == 1
+    assert adapter.last_kwargs["require_search"] is True
+    assert adapter.last_kwargs["return_citations"] is True
+
+
 def test_run_prompt_extracts_files_when_binary_not_supported(monkeypatch, tmp_path: Path) -> None:
     adapter = DummyAdapter(supports_binary_files=False)
     note = tmp_path / "note.txt"

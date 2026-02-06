@@ -18,6 +18,25 @@ from .types import PromptInput
 from .utils import coerce_output
 
 
+def _coerce_bool(value: bool | str | None, *, name: str, allow_none: bool) -> bool | None:
+    if value is None:
+        if allow_none:
+            return None
+        raise SettingsError(f"{name} cannot be None.")
+
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "y", "on"}:
+            return True
+        if lowered in {"false", "0", "no", "n", "off"}:
+            return False
+
+    raise SettingsError(f"{name} must be a boolean value.")
+
+
 def _append_extracted_files_to_prompt(prompt: PromptInput, extracted: Iterable[tuple[Path, str]]) -> PromptInput:
     blocks = []
     for path, text in extracted:
@@ -94,9 +113,15 @@ def run_prompt(
         If return_citations is True, returns (result, citations).
     """
 
-    effective_return_citations = require_search if return_citations is None else return_citations
+    require_search_bool = bool(_coerce_bool(require_search, name="require_search", allow_none=False))
+    return_citations_bool = _coerce_bool(return_citations, name="return_citations", allow_none=True)
+    binary_files_bool = bool(_coerce_bool(binary_files, name="binary_files", allow_none=False))
+
+    effective_return_citations = (
+        require_search_bool if return_citations_bool is None else bool(return_citations_bool)
+    )
     # Citations require grounded search context; citations always force search on.
-    effective_require_search = require_search or effective_return_citations
+    effective_require_search = require_search_bool or effective_return_citations
 
     settings = load_settings(settings_file)
     provider, resolved_model = resolve_provider_and_model(settings, model)
@@ -125,7 +150,7 @@ def run_prompt(
     adapter_files: list[Path] | None = None
     file_paths = collect_file_paths(file=file, files=files)
     if file_paths:
-        if binary_files and adapter.supports_binary_files:
+        if binary_files_bool and adapter.supports_binary_files:
             adapter_files = file_paths
         else:
             extracted = extract_text_from_files(file_paths)
@@ -149,7 +174,7 @@ def run_prompt(
             return_citations=effective_return_citations,
             file=file,
             files=files,
-            binary_files=binary_files,
+            binary_files=binary_files_bool,
             model=model,
             output_format=output_format,
             provider_kwargs=provider_kwargs,
@@ -159,7 +184,7 @@ def run_prompt(
             "model": resolved_model,
             "require_search": effective_require_search,
             "return_citations": effective_return_citations,
-            "binary_files": binary_files,
+            "binary_files": binary_files_bool,
             "adapter_supports_binary": adapter.supports_binary_files,
             "file_count": len(file_paths),
             "params": combined_adapter_options,
