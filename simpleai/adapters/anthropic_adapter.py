@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 import os
 from pathlib import Path
 from typing import Any, Sequence
@@ -41,6 +42,11 @@ class AnthropicAdapter(BaseAdapter):
             messages.append({"role": "user", "content": [{"type": "text", "text": ""}]})
 
         return messages
+
+    def _prompt_as_text(self, prompt: PromptInput) -> str:
+        if isinstance(prompt, str):
+            return prompt
+        return "\n\n".join(str(item) for item in prompt)
 
     def _normalize_schema_for_anthropic(self, schema: dict[str, Any]) -> dict[str, Any]:
         """Anthropic requires explicit additionalProperties for object schemas."""
@@ -131,6 +137,50 @@ class AnthropicAdapter(BaseAdapter):
 
         return citations
 
+    def _extract_text(self, response_dict: dict[str, Any]) -> str:
+        texts: list[str] = []
+        for block in response_dict.get("content", []):
+            if block.get("type") == "text":
+                text = block.get("text", "")
+                if text:
+                    texts.append(text)
+        return "\n".join(texts).strip()
+
+    def _has_web_search_result(self, response_dict: dict[str, Any]) -> bool:
+        for block in response_dict.get("content", []):
+            if block.get("type") == "web_search_tool_result":
+                return True
+        return False
+
+    def _render_web_search_context(self, response_dict: dict[str, Any]) -> str:
+        lines: list[str] = []
+        for block in response_dict.get("content", []):
+            if block.get("type") != "web_search_tool_result":
+                continue
+            raw_content = block.get("content") or []
+            if isinstance(raw_content, dict):
+                raw_content = [raw_content]
+            for item in raw_content:
+                title = item.get("title") or ""
+                url = item.get("url") or ""
+                age = item.get("page_age") or ""
+                parts = [part for part in (title, url, age) if part]
+                if parts:
+                    lines.append(" | ".join(parts))
+        return "\n".join(lines)
+
+    def _citation_key(self, item: Citation) -> tuple[Any, ...]:
+        return (
+            item.provider,
+            item.url,
+            item.title,
+            item.source,
+            item.snippet,
+            item.citation_id,
+            item.start_index,
+            item.end_index,
+        )
+
     def run(
         self,
         *,
@@ -175,14 +225,70 @@ class AnthropicAdapter(BaseAdapter):
 
             response = self.client.messages.create(**payload)
             response_dict = response.model_dump(mode="json") if hasattr(response, "model_dump") else {}
-
-            texts: list[str] = []
-            for block in response_dict.get("content", []):
-                if block.get("type") == "text":
-                    texts.append(block.get("text", ""))
-            text = "\n".join(item for item in texts if item)
+            text = self._extract_text(response_dict)
 
             citations = self._extract_citations(response_dict) if return_citations else []
+
+            # If a forced search turn returns only tool blocks (no text), synthesize a final response.
+            if not text:
+                has_search_result = self._has_web_search_result(response_dict)
+                if require_search and has_search_result:
+                    search_context = self._render_web_search_context(response_dict)
+                    prompt_text = self._prompt_as_text(prompt)
+                    synthesis_text = (
+                        f"{prompt_text}\n\n"
+                        "Web search results already gathered:\n"
+                        f"{search_context}\n\n"
+                        "Return the final answer now. "
+                        "If a JSON schema is required, return only valid JSON."
+                    )
+                    synthesis_payload: dict[str, Any] = {
+                        "model": model,
+                        "max_tokens": int(self.provider_settings.get("max_tokens", 4096)),
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": [{"type": "text", "text": synthesis_text}],
+                            }
+                        ],
+                    }
+                    if output_format is not None:
+                        synthesis_payload["output_config"] = {
+                            "format": {
+                                "type": "json_schema",
+                                "schema": self._normalize_schema_for_anthropic(
+                                    output_format.model_json_schema()
+                                ),
+                            }
+                        }
+                    if adapter_options:
+                        passthrough = dict(adapter_options)
+                        passthrough.pop("tools", None)
+                        passthrough.pop("tool_choice", None)
+                        synthesis_payload.update(passthrough)
+
+                    synthesis_response = self.client.messages.create(**synthesis_payload)
+                    synthesis_dict = (
+                        synthesis_response.model_dump(mode="json")
+                        if hasattr(synthesis_response, "model_dump")
+                        else {}
+                    )
+                    text = self._extract_text(synthesis_dict)
+                    if return_citations:
+                        for extra in self._extract_citations(synthesis_dict):
+                            if self._citation_key(extra) not in {self._citation_key(c) for c in citations}:
+                                citations.append(extra)
+
+                    if text:
+                        response_dict = synthesis_dict
+
+            # Last-resort fallback: some schema-compatible outputs may appear as tool-like input.
+            if not text and output_format is not None:
+                for block in response_dict.get("content", []):
+                    if block.get("type") in {"tool_use", "server_tool_use"} and isinstance(block.get("input"), dict):
+                        text = json.dumps(block["input"], ensure_ascii=True)
+                        break
+
             return AdapterResponse(text=text, citations=citations, raw=response_dict)
 
         except Exception as exc:  # pragma: no cover - network/provider behavior

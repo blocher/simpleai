@@ -24,6 +24,7 @@ All notable changes to this project will be documented in this file.
   - Grok: migrated from deprecated live search parameters to xAI Agent Tools `web_search`.
 - Fixed Anthropic structured output schema handling by explicitly normalizing JSON Schema object nodes with `additionalProperties: false`.
 - Added boolean-string coercion for `require_search`, `return_citations`, and `binary_files`.
+- Added Anthropic fallback synthesis pass when a forced web-search turn returns no final text block, preventing downstream JSON parsing failures for structured output.
 
 ### Added
 - `README_API_KEYS.md` with provider key acquisition/setup instructions.

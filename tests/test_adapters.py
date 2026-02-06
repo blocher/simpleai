@@ -186,6 +186,63 @@ def test_anthropic_schema_normalization_forces_nested_additional_properties_fals
     walk(schema)
 
 
+def test_anthropic_adapter_synthesizes_when_search_turn_has_no_text() -> None:
+    class FakeAnthropicResponse:
+        def __init__(self, payload: dict[str, Any]) -> None:
+            self._payload = payload
+
+        def model_dump(self, mode: str = "json") -> dict[str, Any]:
+            return self._payload
+
+    class FakeMessages:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                return FakeAnthropicResponse(
+                    {
+                        "content": [
+                            {
+                                "type": "web_search_tool_result",
+                                "content": [
+                                    {"title": "Company Site", "url": "https://company.example"}
+                                ],
+                            }
+                        ]
+                    }
+                )
+            return FakeAnthropicResponse(
+                {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "{\"value\": 42}",
+                        }
+                    ]
+                }
+            )
+
+    fake_messages = FakeMessages()
+    adapter = AnthropicAdapter({"api_key": "test", "max_tokens": 100})
+    adapter.client = SimpleNamespace(messages=fake_messages)
+
+    response = adapter.run(
+        prompt="Summarize and return JSON",
+        model="claude-opus-4-6",
+        require_search=True,
+        return_citations=True,
+        files=None,
+        output_format=OutputModel,
+        adapter_options=None,
+    )
+
+    assert response.text == "{\"value\": 42}"
+    assert any(c.url == "https://company.example" for c in response.citations)
+    assert len(fake_messages.calls) == 2
+
+
 def test_gemini_adapter_payload_and_citations(tmp_path: Path) -> None:
     upload_file = tmp_path / "data.txt"
     upload_file.write_text("hello", encoding="utf-8")
