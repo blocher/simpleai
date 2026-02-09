@@ -131,7 +131,7 @@ def run_prompt(
         if not isinstance(provider_settings, dict):
             raise SettingsError(f"Invalid settings for provider '{provider}'.")
 
-        if provider_settings.get("api_key") is None:
+        if not provider_settings.get("api_key"):
             provider_settings = dict(provider_settings)
             provider_settings["api_key"] = get_provider_api_key(settings, provider)
 
