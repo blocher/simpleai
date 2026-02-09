@@ -23,7 +23,7 @@
     },
     "perplexity": {
       "api_key": "YOUR_PERPLEXITY_API_KEY",
-      "default_model": "deep-research",
+      "default_model": "deep-research"
     }
   },
   "logging": {
