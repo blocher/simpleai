@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -103,8 +104,9 @@ def canonical_provider_name(name: str) -> str | None:
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     merged = deepcopy(base)
     for key, value in override.items():
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = _deep_merge(merged[key], value)
+        if isinstance(value, Mapping) and isinstance(merged.get(key), dict):
+            # Convert Mapping to dict for recursive merge
+            merged[key] = _deep_merge(merged[key], dict(value))
         else:
             merged[key] = value
     return merged
@@ -148,8 +150,8 @@ def _load_from_django() -> dict[str, Any] | None:
 
     for attr in ("SIMPLEAI", "SIMPLEAI_SETTINGS"):
         value = getattr(django_settings, attr, None)
-        if isinstance(value, dict):
-            return value
+        if isinstance(value, Mapping):
+            return dict(value)
 
     return None
 
