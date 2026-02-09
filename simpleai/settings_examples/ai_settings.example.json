@@ -32,6 +32,7 @@
   },
   "logging": {
     "enabled": true,
+    "network_logging": true,
     "django_logfile": "django",
     "logfile_location": "./simpleai.log"
   }

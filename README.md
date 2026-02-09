@@ -163,6 +163,7 @@ SIMPLEAI = {
     },
     "logging": {
         "enabled": True,
+        "network_logging": True,
         "django_logfile": "django",
         "logfile_location": "./simpleai.log",
     },
@@ -209,6 +210,9 @@ When enabled, each `run_prompt` call logs:
 - adapter payload params
 - result preview
 - detailed errors
+- full HTTP request/response details (method, URL, headers, body, status) if `network_logging` is enabled in settings
+
+Logs are pretty-printed JSON for better readability.
 
 ## Provider adapters
 

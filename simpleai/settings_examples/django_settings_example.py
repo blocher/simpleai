@@ -34,6 +34,7 @@ SIMPLEAI = {
     },
     "logging": {
         "enabled": True,
+        "network_logging": True,
         "django_logfile": "django",
         "logfile_location": "./simpleai.log",
     },

@@ -52,6 +52,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     },
     "logging": {
         "enabled": False,
+        "network_logging": False,
         "django_logfile": "django",
         "logfile_location": "./simpleai.log",
     },
