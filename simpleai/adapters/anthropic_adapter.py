@@ -22,10 +22,7 @@ from simpleai.schema import (
 from simpleai.types import AdapterResponse, Citation, PromptInput
 
 
-# Default rate limit settings for Tier 1 accounts
-DEFAULT_RATE_LIMIT_DELAY = 2.0  # seconds between API calls
 DEFAULT_MAX_RETRIES = 3
-DEFAULT_RETRY_BASE_DELAY = 60.0  # base delay for exponential backoff on 429
 
 
 class AnthropicAdapter(BaseAdapter):
@@ -44,11 +41,8 @@ class AnthropicAdapter(BaseAdapter):
         self.client = Anthropic(api_key=api_key)
 
         # Rate limiting configuration
-        self._rate_limit_delay = float(provider_settings.get("rate_limit_delay", DEFAULT_RATE_LIMIT_DELAY))
         self._max_retries = int(provider_settings.get("max_retries", DEFAULT_MAX_RETRIES))
-        self._retry_base_delay = float(provider_settings.get("retry_base_delay", DEFAULT_RETRY_BASE_DELAY))
         self._skip_citation_followup = bool(provider_settings.get("skip_citation_followup", False))
-        self._last_request_time: float | None = None
 
     def _build_messages(self, prompt: PromptInput) -> list[dict[str, Any]]:
         if isinstance(prompt, str):
@@ -178,43 +172,47 @@ class AnthropicAdapter(BaseAdapter):
             item.end_index,
         )
 
-    def _wait_for_rate_limit(self) -> None:
-        """Wait if needed to respect rate limits between API calls."""
-        if self._last_request_time is not None and self._rate_limit_delay > 0:
-            elapsed = time.time() - self._last_request_time
-            if elapsed < self._rate_limit_delay:
-                time.sleep(self._rate_limit_delay - elapsed)
+    def _get_retry_after(self, exc: Exception) -> float | None:
+        """Extract retry-after value from rate limit error response headers."""
+        response = getattr(exc, "response", None)
+        if response is None:
+            return None
+
+        headers = getattr(response, "headers", None)
+        if headers is None:
+            return None
+
+        # Check for retry-after header (case-insensitive)
+        retry_after = headers.get("retry-after") or headers.get("Retry-After")
+        if retry_after:
+            try:
+                return float(retry_after)
+            except (ValueError, TypeError):
+                pass
+
+        return None
 
     def _create_with_retry(self, payload: dict[str, Any]) -> Any:
-        """Make API call with rate limiting and exponential backoff on 429 errors."""
+        """Make API call with retry based on retry-after header from 429 responses."""
         from anthropic import RateLimitError
-
-        self._wait_for_rate_limit()
 
         last_error: Exception | None = None
         for attempt in range(self._max_retries + 1):
             try:
-                self._last_request_time = time.time()
                 return self.client.messages.create(**payload)
             except RateLimitError as exc:
                 last_error = exc
                 if attempt < self._max_retries:
-                    # Exponential backoff: base_delay * 2^attempt
-                    delay = self._retry_base_delay * (2 ** attempt)
-                    # Check if the error message contains a suggested wait time
-                    error_msg = str(exc)
-                    if "retry" in error_msg.lower():
-                        # Try to extract the suggested wait time
-                        import re
-                        match = re.search(r'(\d+(?:\.\d+)?)\s*second', error_msg)
-                        if match:
-                            suggested_delay = float(match.group(1))
-                            delay = max(delay, suggested_delay + 1)  # Add 1 second buffer
-                    time.sleep(delay)
+                    retry_after = self._get_retry_after(exc)
+                    if retry_after is not None:
+                        # Use the retry-after header value with a small buffer
+                        time.sleep(retry_after + 1.0)
+                    else:
+                        # Fallback if header is missing (shouldn't happen with Anthropic)
+                        time.sleep(60.0)
                 else:
                     raise
 
-        # Should not reach here, but just in case
         if last_error:
             raise last_error
         raise ProviderError("Unexpected error in retry logic")

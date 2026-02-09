@@ -29,10 +29,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
             "api_key": None,
             "default_model": "claude-opus-4-6",
             "max_tokens": 4096,
-            # Rate limiting options for Tier 1 accounts
-            "rate_limit_delay": 2.0,  # seconds between API calls
-            "max_retries": 3,  # number of retries on 429 errors
-            "retry_base_delay": 60.0,  # base delay for exponential backoff
+            "max_retries": 3,  # retries on 429 errors (uses retry-after header)
             "skip_citation_followup": False,  # skip extra API call for citations
         },
         "openai": {

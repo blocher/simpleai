@@ -9,7 +9,9 @@
     "claude": {
       "api_key": "YOUR_ANTHROPIC_API_KEY",
       "default_model": "claude-opus-4-6",
-      "max_tokens": 4096
+      "max_tokens": 4096,
+      "max_retries": 3,
+      "skip_citation_followup": false
     },
     "openai": {
       "api_key": "YOUR_OPENAI_API_KEY",

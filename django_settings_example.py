@@ -12,6 +12,8 @@ SIMPLEAI = {
             "api_key": "YOUR_ANTHROPIC_API_KEY",
             "default_model": "claude-opus-4-6",
             "max_tokens": 4096,
+            "max_retries": 3,  # retries on 429 errors (uses retry-after header)
+            "skip_citation_followup": False,  # skip extra API call for citations
         },
         "openai": {
             "api_key": "YOUR_OPENAI_API_KEY",

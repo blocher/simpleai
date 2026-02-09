@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- Anthropic rate limiting support for Tier 1 accounts:
+  - Automatic retry using `retry-after` header from 429 responses
+  - Configurable retry count (`max_retries`)
+  - Option to skip secondary citation API call (`skip_citation_followup`)
+
 ## [0.1.0] - 2026-02-06
 
 ### Added

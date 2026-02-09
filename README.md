@@ -223,7 +223,9 @@ Adapters are in `simpleai/adapters/`:
 
 Anthropic Tier 1 accounts have strict rate limits (e.g., 30,000 input tokens per minute). When using `return_citations=True` with structured output, the adapter may make multiple API calls, which can exceed these limits.
 
-Configuration options to mitigate rate limiting (set in `ai_settings.json` under `providers.claude`):
+The adapter automatically handles rate limiting by reading the `retry-after` header from 429 responses and waiting the exact time specified by the API before retrying.
+
+Configuration options (set in `ai_settings.json` under `providers.claude`):
 
 ```json
 {
@@ -232,9 +234,7 @@ Configuration options to mitigate rate limiting (set in `ai_settings.json` under
       "api_key": "...",
       "default_model": "claude-opus-4-6",
       "max_tokens": 4096,
-      "rate_limit_delay": 2.0,
       "max_retries": 3,
-      "retry_base_delay": 60.0,
       "skip_citation_followup": false
     }
   }
@@ -243,14 +243,12 @@ Configuration options to mitigate rate limiting (set in `ai_settings.json` under
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `rate_limit_delay` | `2.0` | Minimum seconds between consecutive API calls |
 | `max_retries` | `3` | Number of retries on 429 rate limit errors |
-| `retry_base_delay` | `60.0` | Base delay (seconds) for exponential backoff on 429 errors |
 | `skip_citation_followup` | `false` | Skip the secondary citation-gathering API call (reduces API calls but may return fewer citations) |
 
 **Tips for Tier 1 accounts:**
+- The adapter automatically respects the `retry-after` header from Anthropic's API
 - Set `skip_citation_followup: true` to reduce API calls when using structured output with citations
-- Increase `rate_limit_delay` to 5-10 seconds for very strict rate limits
 - Consider upgrading to a higher tier for production workloads
 
 ## Example usage
