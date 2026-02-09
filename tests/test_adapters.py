@@ -399,6 +399,7 @@ def test_grok_adapter_payload_and_citations(tmp_path: Path) -> None:
             self.id = "1"
             self.start_index = 0
             self.end_index = 5
+            self.title = "Grok Article"
             self.web_citation = SimpleNamespace(url="https://grok.example")
 
         def HasField(self, field: str) -> bool:
@@ -463,10 +464,13 @@ def test_grok_adapter_payload_and_citations(tmp_path: Path) -> None:
 
     assert response.text == "grok answer"
     assert response.citations[0].source == "https://grok.example"
+    assert response.citations[1].title == "Grok Article"
+    assert response.citations[1].raw["title"] == "Grok Article"
+    assert response.citations[1].url == "https://grok.example"
     assert fake_chat.payload["model"] == "grok-4-latest"
     assert fake_chat.payload["tools"] == ["web_search_tool"]
     assert fake_chat.payload["tool_choice"] == "required"
-    assert fake_chat.payload["max_turns"] == 4
+    assert fake_chat.payload["max_turns"] == 12
     assert fake_chat.payload["include"] == ["inline_citations", "web_search_call_output"]
     assert fake_chat.payload["temperature"] == 0.4
 

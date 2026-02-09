@@ -92,12 +92,13 @@ class GrokAdapter(BaseAdapter):
         # Inline citations contain structured metadata and positions.
         for inline in getattr(response, "inline_citations", []) or []:
             url = None
-            title = None
+            title = getattr(inline, "title", None)
             source = None
             raw: dict[str, Any] = {
                 "id": getattr(inline, "id", None),
                 "start_index": getattr(inline, "start_index", None),
                 "end_index": getattr(inline, "end_index", None),
+                "title": title,
             }
 
             if hasattr(inline, "HasField") and inline.HasField("web_citation"):

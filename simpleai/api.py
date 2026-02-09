@@ -24,6 +24,9 @@ def _coerce_bool(value: bool | str | None, *, name: str, allow_none: bool) -> bo
             return None
         raise SettingsError(f"{name} cannot be None.")
 
+    if isinstance(value, int):
+        return bool(value)
+
     if isinstance(value, bool):
         return value
 

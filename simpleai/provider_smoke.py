@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal, Sequence
@@ -88,10 +89,14 @@ def resolve_sample_file_path(file_path: str | Path | None = None) -> Path:
     if file_path is not None:
         candidates.append(Path(file_path).expanduser())
 
+    if env_val := os.getenv("SAMPLE_PDF_PATH"):
+        env_path = Path(env_val).expanduser()
+        if env_path.exists():
+            candidates.append(env_path)
+
     candidates.extend(
         [
             Path(__file__).resolve().parent / "samples" / "functionalsample.pdf",
-            Path("/Users/benjaminlocher/hae/api/functionalsample.pdf"),
             Path.cwd() / "functionalsample.pdf",
             Path(__file__).resolve().parents[1] / "functionalsample.pdf",
         ]
@@ -191,7 +196,7 @@ def run_provider_matrix(
             response = run_prompt(
                 PROMPT,
                 output_format=JobHistory,
-                return_citations="True",
+                return_citations=True,
                 binary_files=True,
                 model=target.model_arg,
                 file=str(file_path),
