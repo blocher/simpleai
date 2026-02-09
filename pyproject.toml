@@ -45,9 +45,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "http://github.com/HireAnEsquire/simpleai"
-Repository = "http://github.com/HireAnEsquire/simpleai"
-Issues = "http://github.com/HireAnEsquire/simpleai/issues"
+Homepage = "https://github.com/HireAnEsquire/simpleai"
+Repository = "https://github.com/HireAnEsquire/simpleai"
+Issues = "https://github.com/HireAnEsquire/simpleai/issues"
 
 [tool.setuptools]
 include-package-data = true
