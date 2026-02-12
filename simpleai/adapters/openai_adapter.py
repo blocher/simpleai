@@ -210,4 +210,25 @@ class OpenAIAdapter(BaseAdapter):
             return AdapterResponse(text=text, citations=citations, raw=response_dict)
 
         except Exception as exc:  # pragma: no cover - network/provider behavior
-            raise ProviderError(f"OpenAI adapter failed: {exc}") from exc
+            msg = f"OpenAI adapter failed: {exc}"
+
+            # Add rate limit headers if available (e.g. on 429 errors)
+            headers = getattr(exc, "headers", None)
+            if headers:
+                relevant_headers = [
+                    "x-ratelimit-limit-requests",
+                    "x-ratelimit-limit-tokens",
+                    "x-ratelimit-remaining-requests",
+                    "x-ratelimit-remaining-tokens",
+                    "x-ratelimit-reset-requests",
+                    "x-ratelimit-reset-tokens",
+                ]
+                details = [
+                    f"{key}: {headers.get(key)}"
+                    for key in relevant_headers
+                    if headers.get(key) is not None
+                ]
+                if details:
+                    msg += "\n\nRate limit headers:\n" + "\n".join(details)
+
+            raise ProviderError(msg) from exc
